@@ -4,7 +4,7 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Pin to current Aspire (13.4). The Docker Compose publisher is GA as of 13.2. -->
-    <PackageVersion Include="Aspire.Hosting" Version="13.4.0" />
+    <PackageVersion Include="Aspire.Hosting" Version="13.4.3" />
     <PackageVersion Include="Aspire.Hosting.Docker" Version="13.4.0" />
     <PackageVersion Include="MinVer" Version="6.0.0" />
   </ItemGroup>
