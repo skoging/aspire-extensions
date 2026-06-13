@@ -1,0 +1,36 @@
+name: Build
+
+# GitHub-hosted runners ONLY in this public repo — fork PRs must never reach a self-hosted runner.
+on:
+  pull_request:   # PR validation only — pushes to main go through release.yml (build + publish)
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 0   # MinVer needs tags/height for sensible build versions
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9  # v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build (both packages + sample)
+        run: dotnet build AspireExtensions.sln --configuration Release
+
+      - name: Pack (dry run — catches packaging/metadata errors)
+        run: |
+          dotnet pack src/Aspire.Hosting.Komodo/Aspire.Hosting.Komodo.csproj --configuration Release --no-build -o out/packages
+          dotnet pack src/Aspire.Hosting.Pangolin/Aspire.Hosting.Pangolin.csproj --configuration Release --no-build -o out/packages
+          ls -la out/packages
+
+      - name: Verify package independence (no cross-references)
+        run: |
+          set -euo pipefail
+          ! grep -rE 'Pangolin|IngressTarget' src/Aspire.Hosting.Komodo/*.cs
+          ! grep -rE 'Komodo' src/Aspire.Hosting.Pangolin/*.cs
+          echo "decoupling holds"

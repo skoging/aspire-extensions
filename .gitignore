@@ -1,0 +1,22 @@
+## .NET
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+.vs/
+.idea/
+
+## Aspire
+**/.aspire/
+aspire-output/
+
+## Local secrets / config
+*.local.json
+.env.local
+secrets.json
+
+## OS
+.DS_Store
+Thumbs.db
+out/

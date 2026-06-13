@@ -1,0 +1,84 @@
+# Minimal hermetic Komodo for proving the Aspire.Hosting.Komodo deploy target.
+#
+# Core + Mongo + a local Periphery that drives THIS host's Docker (via the mounted
+# docker.sock), so Stacks deployed through the Aspire publisher run as local
+# containers you can see with `docker ps`.
+#
+# Auth: keypair via a shared `keys` volume (Komodo's official local pattern). Core and
+# Periphery each generate their Ed25519 keypair into /config/keys on first boot and
+# trust each other's public key by `file:` reference — zero manual key handling.
+# Local username/password auth is ON so the publisher / bootstrap can mint an API key
+# headlessly (admin / admin).
+#
+# Bring up:   docker compose -f local-komodo/docker-compose.yml up -d
+# Core API:   http://localhost:9120   (admin / admin)
+# Tear down:  docker compose -f local-komodo/docker-compose.yml down -v
+name: komodo-local
+
+networks:
+  komodo:
+
+volumes:
+  mongo_data:
+  keys: # shared between core + periphery for mutual keypair trust
+
+services:
+  mongo:
+    image: mongo:8
+    container_name: komodo-local-mongo
+    restart: unless-stopped
+    networks: [komodo]
+    labels:
+      komodo.skip: ""
+    command: --quiet --wiredTigerCacheSizeGB 0.25
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin
+
+  core:
+    image: ghcr.io/moghtech/komodo-core:2.2.0
+    container_name: komodo-local-core
+    init: true
+    restart: unless-stopped
+    depends_on: [mongo]
+    networks: [komodo]
+    ports:
+      - "9120:9120"
+    volumes:
+      - keys:/config/keys
+    environment:
+      KOMODO_DATABASE_USERNAME: admin
+      KOMODO_DATABASE_PASSWORD: admin
+      KOMODO_DATABASE_ADDRESS: mongo:27017
+      KOMODO_HOST: http://localhost:9120
+      KOMODO_TITLE: Komodo (local)
+      # Local login so we can mint an API key headlessly.
+      KOMODO_LOCAL_AUTH: "true"
+      KOMODO_INIT_ADMIN_USERNAME: admin
+      KOMODO_INIT_ADMIN_PASSWORD: admin
+      KOMODO_JWT_SECRET: local-jwt-secret-change-me
+      KOMODO_WEBHOOK_SECRET: local-webhook-secret
+      # Trust the local Periphery's pubkey from the shared keys volume.
+      KOMODO_PERIPHERY_PUBLIC_KEY: file:/config/keys/periphery.pub
+      # Auto-register the local Periphery as a Server named "local".
+      KOMODO_FIRST_SERVER_NAME: local
+      KOMODO_FIRST_SERVER_ADDRESS: https://periphery:8120
+      TZ: Etc/UTC
+
+  periphery:
+    image: ghcr.io/moghtech/komodo-periphery:2.2.0
+    container_name: komodo-local-periphery
+    init: true
+    restart: unless-stopped
+    networks: [komodo]
+    labels:
+      komodo.skip: ""
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - keys:/config/keys
+    environment:
+      # Trust Core's pubkey from the shared keys volume.
+      PERIPHERY_CORE_PUBLIC_KEYS: file:/config/keys/core.pub
+      TZ: Etc/UTC

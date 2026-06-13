@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Alpha targets net10.0 only; multi-targeting (netstandard2.0;net8.0) is planned before 1.0. -->
+    <IsPackable>true</IsPackable>
+    <PackageId>Skoging.Aspire.Hosting.Komodo</PackageId>
+    <PackageTags>aspire;komodo;deployment;docker-compose;devops;self-hosted;homelab</PackageTags>
+    <Description>Deploy .NET Aspire apps to a Komodo server. Resource-type-agnostic deploy target: extends the Docker Compose environment so `aspire publish` emits a Komodo Resource-Sync TOML and `aspire deploy` upserts + deploys a Stack via the Komodo API — deploying whatever compose Aspire emits.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting" />
+    <PackageReference Include="Aspire.Hosting.Docker" />
+  </ItemGroup>
+</Project>

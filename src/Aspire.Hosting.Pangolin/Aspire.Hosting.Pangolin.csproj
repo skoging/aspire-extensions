@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Alpha targets net10.0 only; multi-targeting (netstandard2.0;net8.0) is planned before 1.0. -->
+    <IsPackable>true</IsPackable>
+    <PackageId>Skoging.Aspire.Hosting.Pangolin</PackageId>
+    <PackageTags>aspire;pangolin;ingress;docker-compose;reverse-proxy;self-hosted;homelab</PackageTags>
+    <Description>A label-driven Pangolin ingress provider for Aspire Docker Compose environments. Stamps `pangolin.public-resources.*` docker labels onto externally-exposed services, joins them to the ingress network, and tears the routes down on `aspire destroy`. Resource-type-agnostic and deploy-target-agnostic: pairs with any compose deploy target via docker labels alone.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting" />
+    <PackageReference Include="Aspire.Hosting.Docker" />
+  </ItemGroup>
+</Project>

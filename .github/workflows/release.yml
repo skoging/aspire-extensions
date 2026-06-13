@@ -1,0 +1,78 @@
+name: Release to NuGet
+
+# Merge-driven alpha release via NuGet TRUSTED PUBLISHING (OIDC) — no long-lived API key secret.
+# EVERY push to main publishes both packages: MinVer derives a unique, monotonically increasing
+# prerelease version from git height (e.g. 0.1.0-alpha.1, then 0.1.0-alpha.1.1, .2 …), so each
+# merge ships a consumable build with no manual tagging. To cut a cleaner milestone, push a tag
+# like v0.2.0-alpha.1 and MinVer continues from there.
+#
+# The job requests a short-lived OIDC token from GitHub and exchanges it with nuget.org for a
+# temporary (1h) API key (NuGet/login) right before the push — no secret stored.
+#
+# ONE-TIME setup on nuget.org (Account → Trusted Publishing → Add policy):
+#   Repository Owner: skoging
+#   Repository:       aspire-extensions
+#   Workflow File:    release.yml          (filename only, no path)
+#   Environment:      nuget                 (must match the job's `environment:` below)
+#   Owner:            your nuget.org user (the policy covers all packages you own,
+#                     incl. these two on their first publish)
+#
+# GitHub-hosted runner only (public repo — never a self-hosted runner here).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+# Serialize publishes: a tag + a branch push on the same commit would otherwise fan out into two
+# concurrent runs of the same version. Never cancel-in-progress — a publish must finish.
+concurrency:
+  group: nuget-publish
+  cancel-in-progress: false
+
+# Least privilege at the workflow level; the OIDC capability is granted only to the publish job below.
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC token issuance for the nuget.org token exchange (scoped to this job)
+      contents: read
+    # Tracked GitHub Environment: every nuget.org publish shows in the repo's environment
+    # timeline (history of what version shipped when), and the trusted-publishing policy is
+    # scoped to it. Add protection rules here later (required reviewer / wait timer) if wanted.
+    environment:
+      name: nuget
+      url: https://www.nuget.org/profiles/skoging
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 0   # MinVer derives the version from git tags/height
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9  # v4
+        with:
+          dotnet-version: 10.0.x
+
+      # No explicit version: MinVer reads the pushed tag (v0.1.0-alpha.1 → 0.1.0-alpha.1).
+      - name: Pack
+        run: |
+          dotnet pack src/Aspire.Hosting.Komodo/Aspire.Hosting.Komodo.csproj --configuration Release -o out/packages
+          dotnet pack src/Aspire.Hosting.Pangolin/Aspire.Hosting.Pangolin.csproj --configuration Release -o out/packages
+          ls -la out/packages
+
+      # Exchange the OIDC token for a short-lived nuget.org API key (valid ~1h) — requested
+      # immediately before the push so it can't expire mid-run.
+      - name: NuGet login (OIDC → temporary API key)
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841  # v1
+        with:
+          user: skoging
+
+      - name: Push to nuget.org
+        run: |
+          dotnet nuget push "out/packages/*.nupkg" \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate

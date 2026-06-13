@@ -1,0 +1,36 @@
+<Project>
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Aspire's publish/deploy pipeline + compute-environment APIs are [Experimental] in 13.x.
+         We build on them deliberately; suppress the experimental-usage diagnostics. -->
+    <NoWarn>$(NoWarn);ASPIREPIPELINES001;ASPIREPIPELINES004;ASPIRECOMPUTE001;ASPIRECOMPUTE003;ASPIREDOCKERFILEBUILDER001;ASPIREATS001</NoWarn>
+  </PropertyGroup>
+
+  <!-- Shared NuGet metadata for the packable projects (src/*). The package IDs use the
+       Skoging.* prefix - Aspire.Hosting.* is a reserved prefix on nuget.org (Microsoft);
+       the NAMESPACES intentionally stay Aspire.Hosting.* for API discoverability, matching
+       the Aspire community convention. -->
+  <PropertyGroup>
+    <Authors>Tore Hammervoll</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/skoging/aspire-extensions</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/skoging/aspire-extensions</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Versioning is fully automatic via MinVer: the package version is DERIVED from the git tag
+         (tag prefix `v`, so v0.1.0-alpha.1 becomes 0.1.0-alpha.1). Untagged dev/CI builds get a
+         sensible height-based prerelease (e.g. 0.1.0-alpha.0.3). Every push to main publishes; to
+         cut a clean milestone, tag a commit (git tag v0.x.y-alpha.z) and push it. -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerMinimumMajorMinor>0.1</MinVerMinimumMajorMinor>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <!-- MinVer on every project (build-only; never a package dependency). -->
+  <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+  </ItemGroup>
+</Project>
