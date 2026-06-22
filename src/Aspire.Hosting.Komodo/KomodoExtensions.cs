@@ -32,13 +32,26 @@ public static class KomodoExtensions
         var name = builder.Resource.Name;
 
         return builder
-            // PUBLISH face: emit an inspectable Komodo Resource-Sync TOML next to the compose.
+            // PUBLISH face: make internal service references stack-unique — stamp a stack-unique container_name
+            // on each internal service + rewrite its bare-alias URL hosts to it — so cross-stack docker DNS
+            // round-robin on shared external networks can't misroute one stack's traffic to another's service.
+            // Runs after the compose is written ("publish-{name}"). The configuration hook below ALSO serializes
+            // it after the ingress provider's stamp step when one is present, so the two compose text
+            // post-processors never race (added there, not here, because a factory-time dependsOn on a
+            // non-existent step is a hard error).
+            .WithPipelineStepFactory(
+                stepName: $"komodo-stamp-internal-{name}",
+                callback: (PipelineStepContext context) => KomodoInternalStamp.StampAndRewriteAsync(context, options, name),
+                dependsOn: [$"publish-{name}"],
+                requiredBy: [WellKnownPipelineSteps.Publish],
+                tags: [],
+                description: "Stamps stack-unique container_name on internal services + rewrites internal URL host references.")
+            // PUBLISH face: emit an inspectable Komodo Resource-Sync TOML next to the compose. Depends on the
+            // internal-ref stamp so the embedded compose carries the rewrite.
             .WithPipelineStepFactory(
                 stepName: $"komodo-emit-resync-{name}",
                 callback: (PipelineStepContext context) => KomodoSteps.EmitResourceSyncAsync(context, options, name),
-                // Run AFTER the compose environment writes docker-compose.yaml (its publish step is
-                // named "publish-{envName}"), but still within the Publish phase.
-                dependsOn: [$"publish-{name}"],
+                dependsOn: [$"publish-{name}", $"komodo-stamp-internal-{name}"],
                 requiredBy: [WellKnownPipelineSteps.Publish],
                 tags: [],
                 description: "Emits a Komodo Resource-Sync TOML alongside the generated compose.")
@@ -73,6 +86,18 @@ public static class KomodoExtensions
                         TryNeutralizeStep(step);
                     }
                 }
+
+                // Serialize the internal-ref stamp AFTER the ingress provider's stamp step when one is installed,
+                // so the two compose text post-processors don't race (otherwise the later writer clobbers the
+                // other). This is a soft coexistence-ordering on the conventional step-name string only — no type
+                // dependency on the ingress package (the two stay independently usable).
+                var ingressStamp = context.Steps.FirstOrDefault(s => string.Equals(s.Name, $"pangolin-stamp-{name}", StringComparison.Ordinal));
+                var internalStamp = context.Steps.FirstOrDefault(s => string.Equals(s.Name, $"komodo-stamp-internal-{name}", StringComparison.Ordinal));
+                if (ingressStamp is not null && internalStamp is not null && !internalStamp.DependsOnSteps.Contains(ingressStamp.Name))
+                {
+                    internalStamp.DependsOnSteps.Add(ingressStamp.Name);
+                }
+
                 return Task.CompletedTask;
             });
     }

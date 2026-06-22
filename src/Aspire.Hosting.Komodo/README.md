@@ -25,6 +25,11 @@ Highlights:
   back secrets with an external vault).
 - **Existing-resource family** — `PublishAsExisting` / `RunAsExisting` / `AsExisting` redirect
   dependents to an already-running instance (e.g. a shared postgres) instead of deploying one.
+- **Stack-unique internal references** — on `aspire publish` each internal service gets a
+  stack-unique `container_name` and its bare-alias references (`http://api:8080`) are rewritten to
+  match (`http://{stack}-api:8080`), so stacks sharing an external docker network can never
+  round-robin onto each other's services. Externally-exposed services are left to the ingress
+  provider; no hand-pinned service URLs needed.
 
 Pairs with (but does not depend on) `Skoging.Aspire.Hosting.Pangolin` for ingress.
 Full docs: https://github.com/skoging/aspire-extensions
