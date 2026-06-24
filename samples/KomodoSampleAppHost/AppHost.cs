@@ -37,7 +37,11 @@ var apiToken = builder.AddParameter("apitoken", "p@ss {w0rd} [x]", secret: true)
 builder.AddDockerfile("aspire-spike", ".", "Dockerfile")
     .WithHttpEndpoint(targetPort: 80)
     .WithExternalHttpEndpoints()
-    .WithEnvironment("API_TOKEN", apiToken);
+    .WithEnvironment("API_TOKEN", apiToken)
+    // Demonstrates joining a pre-existing external docker network (e.g. a shared observability/collector or
+    // database network that already exists on the deploy host). The emitted compose service joins it and the
+    // network is declared at the top level as `external: true`. No-op in `aspire run`.
+    .WithExternalNetwork("observability");
 
 // An internal service + a consumer that references it by name. Demonstrates stack-unique internal reference
 // rewriting: the consumer's `services__api__http__0` value `http://api:8080` is rewritten to

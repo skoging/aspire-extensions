@@ -25,6 +25,10 @@ Highlights:
   back secrets with an external vault).
 - **Existing-resource family** — `PublishAsExisting` / `RunAsExisting` / `AsExisting` redirect
   dependents to an already-running instance (e.g. a shared postgres) instead of deploying one.
+- **Join shared external networks** — `resource.WithExternalNetwork("name")` attaches the emitted
+  compose service to a pre-existing external docker network (a shared collector or database network)
+  *and* declares it `external: true` at the top level — no hand-rolled `ConfigureComposeFile` /
+  `PublishAsDockerComposeService` escape hatches. Publish-only; idempotent across many joiners.
 - **Stack-unique internal references** — on `aspire publish` each internal service gets a
   stack-unique `container_name` and its bare-alias references (`http://api:8080`) are rewritten to
   match (`http://{stack}-api:8080`), so stacks sharing an external docker network can never
