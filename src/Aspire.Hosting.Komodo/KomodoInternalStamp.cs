@@ -157,11 +157,12 @@ internal static class KomodoInternalStamp
         // service, to that service's effective container_name. Only the value side of each `KEY: VALUE` env entry
         // is touched, so a service-discovery KEY (e.g. `services__api__http__0`) stays byte-identical while its
         // value host becomes stack-unique. Longest-name-first alternation avoids any prefix ambiguity (the host
-        // terminator already prevents prefix matches). The scheme:// prefix + exact-membership + terminator make
+        // terminator already prevents prefix matches). The scheme:// prefix (+ an optional userinfo segment, so
+        // scheme://user:pass@host binds the host group to the real host) + exact-membership + terminator make
         // false positives (http://api.example.com, http://apiserver, Host=postgres) impossible.
         var alternation = string.Join("|",
             effective.Keys.OrderByDescending(k => k.Length).ThenBy(k => k, StringComparer.Ordinal).Select(Regex.Escape));
-        var rx = new Regex($@"(?<pre>[a-zA-Z][a-zA-Z0-9+.\-]*://)(?<host>{alternation})(?<post>[:/?#""'\s]|$)");
+        var rx = new Regex($@"(?<pre>[a-zA-Z][a-zA-Z0-9+.\-]*://(?:[^@/?#\s]+@)?)(?<host>{alternation})(?<post>[:/?#""'\s]|$)");
 
         var localRewrites = 0;
         var outLines = compose.Split('\n');

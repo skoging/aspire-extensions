@@ -244,4 +244,96 @@ public class KomodoInternalStampTests
         Assert.Contains("BOTH: \"http://wishlist-prod-api:8080,http://wishlist-prod-web:80\"", result);
         Assert.Equal(3, rewrites);
     }
+
+    [Fact]
+    public void RewritesHostAfterUserinfo()
+    {
+        // scheme://user:pass@host — the host group must bind to the real host, not the userinfo.
+        var compose =
+            """
+            services:
+              api:
+                image: "nginx:latest"
+                networks:
+                  - "aspire"
+              worker:
+                image: "nginx:latest"
+                environment:
+                  BROKER: "amqp://user:pass@api:5672"
+                networks:
+                  - "aspire"
+            networks:
+              aspire:
+                driver: "bridge"
+            """;
+
+        var result = KomodoInternalStamp.ApplyStackUniqueNaming(compose, Set("api", "worker"), Set(), "wishlist-prod", out _, out var rewrites);
+
+        Assert.Contains("BROKER: \"amqp://user:pass@wishlist-prod-api:5672\"", result);
+        Assert.Equal(1, rewrites);
+    }
+
+    [Fact]
+    public void HandlesRealisticComposeStructure()
+    {
+        // Mirrors the shape Aspire's Docker publisher emits: quoted values, a healthcheck block, a depends_on
+        // MAP, restart, a blank line between services, a pre-stamped external service (web), and top-level
+        // external networks — none of which must derail the env-only rewrite or the internal-only stamping.
+        var compose =
+            """
+            services:
+              api:
+                image: "ghcr.io/x/api:latest"
+                expose:
+                  - "8080"
+                environment:
+                  ConnectionStrings__db: "Host=postgres;Username=app"
+                  OIDC: "https://id.example.com"
+                depends_on:
+                  postgres:
+                    condition: service_started
+                healthcheck:
+                  test: ["CMD", "curl", "http://localhost:8080/health"]
+                restart: "unless-stopped"
+                networks:
+                  - "aspire"
+                  - "observability"
+
+              web:
+                container_name: wishlist-prod-web
+                image: "ghcr.io/x/web:latest"
+                environment:
+                  API_HTTP: "http://api:8080"
+                  AUTH_URL: "https://onskeliste.example.com"
+                networks:
+                  - "aspire"
+                  - "ingress_shared"
+            networks:
+              aspire:
+                driver: "bridge"
+              observability:
+                external: true
+              ingress_shared:
+                name: ingress_shared
+                external: true
+            """;
+
+        var result = KomodoInternalStamp.ApplyStackUniqueNaming(
+            compose, Set("api", "web"), Set("web"), "wishlist-prod", out var stamped, out var rewrites);
+
+        // api (internal) stamped; web (external) left exactly as the ingress provider set it.
+        Assert.Equal(1, stamped);
+        Assert.Contains("    container_name: wishlist-prod-api", result);
+        Assert.Contains("    container_name: wishlist-prod-web", result);
+        // Only the BFF's api reference is rewritten; conn-string host, FQDNs and the healthcheck URL are not.
+        Assert.Equal(1, rewrites);
+        Assert.Contains("API_HTTP: \"http://wishlist-prod-api:8080\"", result);
+        Assert.Contains("Host=postgres;Username=app", result);
+        Assert.Contains("OIDC: \"https://id.example.com\"", result);
+        Assert.Contains("AUTH_URL: \"https://onskeliste.example.com\"", result);
+        Assert.Contains("http://localhost:8080/health", result);
+        // unrelated structure preserved
+        Assert.Contains("condition: service_started", result);
+        Assert.Contains("restart: \"unless-stopped\"", result);
+    }
 }

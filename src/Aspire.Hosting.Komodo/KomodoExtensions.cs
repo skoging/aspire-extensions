@@ -59,9 +59,11 @@ public static class KomodoExtensions
             .WithPipelineStepFactory(
                 stepName: $"komodo-deploy-{name}",
                 callback: (PipelineStepContext context) => KomodoSteps.DeployAsync(context, options, name),
-                // After the compose env writes docker-compose.yaml ("publish-{name}") and after any
-                // image push, but before the Deploy phase completes.
-                dependsOn: [$"publish-{name}", WellKnownPipelineSteps.Push],
+                // After the compose env writes docker-compose.yaml ("publish-{name}"), AFTER the internal-ref
+                // stamp rewrites it ("komodo-stamp-internal-{name}") so we upload the STAMPED compose — steps
+                // run on a dependency DAG with no phase barrier, so without this edge deploy could race the
+                // stamp and ship the bare-alias compose — and after any image push.
+                dependsOn: [$"publish-{name}", $"komodo-stamp-internal-{name}", WellKnownPipelineSteps.Push],
                 requiredBy: [WellKnownPipelineSteps.Deploy],
                 tags: [],
                 description: "Upserts + deploys the stack to Komodo, then removes generated temp files.")
