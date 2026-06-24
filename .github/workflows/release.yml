@@ -55,6 +55,9 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Test
+        run: dotnet test AspireExtensions.sln --configuration Release
+
       # No explicit version: MinVer reads the pushed tag (v0.1.0-alpha.1 → 0.1.0-alpha.1).
       - name: Pack
         run: |

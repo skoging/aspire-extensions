@@ -22,6 +22,9 @@ jobs:
       - name: Build (both packages + sample)
         run: dotnet build AspireExtensions.sln --configuration Release
 
+      - name: Test
+        run: dotnet test AspireExtensions.sln --configuration Release --no-build
+
       - name: Pack (dry run — catches packaging/metadata errors)
         run: |
           dotnet pack src/Aspire.Hosting.Komodo/Aspire.Hosting.Komodo.csproj --configuration Release --no-build -o out/packages

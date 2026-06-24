@@ -29,6 +29,11 @@ Highlights:
   compose service to a pre-existing external docker network (a shared collector or database network)
   *and* declares it `external: true` at the top level — no hand-rolled `ConfigureComposeFile` /
   `PublishAsDockerComposeService` escape hatches. Publish-only; idempotent across many joiners.
+- **Stack-unique internal references** — on `aspire publish` each internal service gets a
+  stack-unique `container_name` and its bare-alias references (`http://api:8080`) are rewritten to
+  match (`http://{stack}-api:8080`), so stacks sharing an external docker network can never
+  round-robin onto each other's services. Externally-exposed services are left to the ingress
+  provider; no hand-pinned service URLs needed.
 
 Pairs with (but does not depend on) `Skoging.Aspire.Hosting.Pangolin` for ingress.
 Full docs: https://github.com/skoging/aspire-extensions

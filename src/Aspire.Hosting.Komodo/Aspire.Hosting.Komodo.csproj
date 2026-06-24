@@ -14,4 +14,7 @@
     <PackageReference Include="Aspire.Hosting" />
     <PackageReference Include="Aspire.Hosting.Docker" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Aspire.Hosting.Komodo.Tests" />
+  </ItemGroup>
 </Project>
