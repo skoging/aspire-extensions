@@ -53,6 +53,7 @@ Config (user-secrets locally, `Komodo__*` env in CI):
 | `Komodo:ServerName` | the Komodo Server (Periphery) to deploy onto |
 | `Komodo:StackName` | the stack name (defaults to the compose environment name) |
 | `Komodo:RegistryProvider` / `Komodo:RegistryAccount` | optional — pull private images via a Komodo registry account |
+| `Komodo:UpdateTimeout` | optional — how long each Komodo update may take (each run-once service's run, then the deploy); default `00:03:00` |
 
 - **`aspire publish`** → emits the compose **plus** a `komodo-<stack>.toml` Resource-Sync file
   (point a Komodo Resource Sync at it for GitOps).
@@ -64,6 +65,13 @@ Config (user-secrets locally, `Komodo__*` env in CI):
   Variables and injected at compose-time via `compose_cmd_wrapper`. The vault is pluggable
   (`KomodoDeployOptions.SecretProvider` / `ISecretProvider`) — implement it to back secrets with an
   external vault instead.
+- **Run-once services** (a migrator, a seeder): declare them the Aspire way,
+  `app.WaitForCompletion(migrator)`, which the compose publisher emits as
+  `condition: service_completed_successfully`. The deploy runs each such service on its own first
+  (`RunStackService`, i.e. `docker compose run --rm`) and redeploys the stack only if it exits 0, so a
+  failure leaves the running containers untouched. Inside a plain `compose up`, the dependent would
+  already have been replaced by then. `up` runs the service again, so it must be idempotent. Komodo
+  leaves these services out of the stack status (`ignore_services`), since they exit by design.
 - **Existing resources**: `postgres.PublishAsExisting(connectionString, network)` (and
   `RunAsExisting`/`AsExisting`, mirroring the Azure trio) redirect dependents to an
   already-running instance instead of deploying a fresh container.

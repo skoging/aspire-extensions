@@ -37,7 +37,9 @@ internal static class KomodoSteps
 
         var compose = await File.ReadAllTextAsync(composePath, context.CancellationToken);
         var tomlPath = Path.Combine(outDir, $"komodo-{name}.toml");
-        await File.WriteAllTextAsync(tomlPath, KomodoResyncToml.Render(name, options.ServerName ?? "local", compose), context.CancellationToken);
+        await File.WriteAllTextAsync(tomlPath,
+            KomodoResyncToml.Render(name, options.ServerName ?? "local", compose, KomodoRunOnce.FindServices(compose)),
+            context.CancellationToken);
         context.Logger.LogInformation("Komodo: wrote Resource-Sync TOML -> {Path}", tomlPath);
     }
 
@@ -143,19 +145,43 @@ internal static class KomodoSteps
                 "Komodo: {Count} secret(s) vaulted + injected via compose_cmd_wrapper (values never enter the stored compose).", secrets.Count);
         }
 
+        var runOnce = KomodoRunOnce.FindServices(resolvedCompose);
+
         context.Logger.LogInformation("Komodo: upserting stack '{Stack}' on '{Server}'…", name, serverName);
         await client.UpsertStackAsync(name, serverId, resolvedCompose, ct,
             registryProvider: options.RegistryProvider, registryAccount: options.RegistryAccount,
-            composeCmdWrapper: composeWrapper);
+            composeCmdWrapper: composeWrapper, ignoreServices: runOnce);
         if (!string.IsNullOrEmpty(options.RegistryAccount))
         {
             context.Logger.LogInformation("Komodo: stack pulls private images via registry account '{Account}' ({Provider}).",
                 options.RegistryAccount, options.RegistryProvider);
         }
 
+        // Run each one on its own before the deploy, not only as part of it. `compose up` recreates a
+        // dependent before it learns that its service_completed_successfully dependency failed, so a
+        // failing run-once service inside `up` leaves the new container created but stopped and the old
+        // one already removed. Run first, a failure stops here with the running containers untouched.
+        // `up` then runs each one again, so they must be idempotent.
+        foreach (var service in runOnce)
+        {
+            context.Logger.LogInformation("Komodo: running run-once service '{Service}'…", service);
+            var runId = await client.RunStackServiceAsync(name, service, ct);
+            try
+            {
+                await client.WaitForUpdateAsync(runId, options.UpdateTimeout, ct);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or TimeoutException)
+            {
+                throw new InvalidOperationException(
+                    $"Komodo: run-once service '{service}' did not complete, so stack '{name}' was not " +
+                    $"redeployed and its running containers are untouched. Its output is in Komodo update {runId}.",
+                    ex);
+            }
+        }
+
         context.Logger.LogInformation("Komodo: deploying stack '{Stack}'…", name);
         var updateId = await client.DeployStackAsync(name, ct);
-        await client.WaitForUpdateAsync(updateId, TimeSpan.FromMinutes(3), ct);
+        await client.WaitForUpdateAsync(updateId, options.UpdateTimeout, ct);
         context.Logger.LogInformation("Komodo: stack '{Stack}' deployed (update {Update}).", name, updateId);
 
         // Clean up so `aspire deploy` leaves no temp files behind (`aspire publish` keeps them).

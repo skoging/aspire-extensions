@@ -48,6 +48,12 @@ public sealed class KomodoDeployOptions
     /// to back secrets with an external vault. A pluggable plane, decoupled from Komodo's deploy mechanics.
     /// </summary>
     public ISecretProvider SecretProvider { get; set; } = new KomodoVariablesSecretProvider();
+
+    /// <summary>
+    /// How long each Komodo update may take: every run-once service's run, then the stack deploy. The deploy
+    /// includes pulling images and <c>docker compose up</c> waiting on its dependencies. Defaults to 3 minutes.
+    /// </summary>
+    public TimeSpan UpdateTimeout { get; set; } = TimeSpan.FromMinutes(3);
 }
 
 /// <summary>Carries <see cref="KomodoDeployOptions"/> on the compose environment resource.</summary>
