@@ -24,7 +24,8 @@ volumes:
 
 services:
   mongo:
-    image: mongo:8
+    # 8.2 or newer: earlier 8.x refuses to start on Linux 6.19+ (SERVER-121912).
+    image: mongo:8.2
     container_name: komodo-local-mongo
     restart: unless-stopped
     networks: [komodo]
