@@ -81,7 +81,7 @@ internal sealed class KomodoApiClient
     /// <summary>Create-or-update a Stack with inline compose content + resolved environment (idempotent).</summary>
     public async Task UpsertStackAsync(string name, string serverId, string composeYaml, CancellationToken ct,
         string? environment = null, string? registryProvider = null, string? registryAccount = null,
-        string? composeCmdWrapper = null)
+        string? composeCmdWrapper = null, IReadOnlyList<string>? ignoreServices = null)
     {
         // `environment` is a .env-style string Komodo hands to `docker compose` for ${VAR} interpolation.
         // registry_provider/registry_account point the Periphery at a Komodo Docker Registry Account so it
@@ -98,14 +98,17 @@ internal sealed class KomodoApiClient
             registry_provider = registryProvider ?? "",
             registry_account = registryAccount ?? "",
             compose_cmd_wrapper = composeCmdWrapper ?? "",
-            // Wrap up/down/pull/build but NOT `config`: Komodo's wrapped `compose config` stage re-serializes
+            // Wrap up/down/pull/build/run but NOT `config`: Komodo's wrapped `compose config` stage re-serializes
             // the resolved compose, and for a compose with an external network that re-serialize hits Core's
             // flatten bug — the whole file comes back as a single-line string the Periphery can't parse
             // ("invalid type: string, expected struct ComposeFile"). Secrets are only needed at up/pull/build,
             // so skipping `config` is free. Verified on local Komodo (the secret + external-network combo).
+            // `run` is how the deploy runs run-once services (RunStackService), which need the secrets too.
             compose_cmd_wrapper_include = string.IsNullOrEmpty(composeCmdWrapper)
                 ? Array.Empty<string>()
-                : new[] { "up", "down", "pull", "build" },
+                : new[] { "up", "down", "pull", "build", "run" },
+            // Run-once services exit by design; counted in the stack status, they mark it unhealthy.
+            ignore_services = ignoreServices ?? Array.Empty<string>(),
         };
         var existingId = await FindStackIdAsync(name, ct);
         if (existingId is null)
@@ -130,6 +133,19 @@ internal sealed class KomodoApiClient
             // Already exists — update the value (is_secret was set at create time).
             await WriteAsync("UpdateVariableValue", new { name, value }, ct);
         }
+    }
+
+    /// <summary>
+    /// Trigger RunStackService: <c>docker compose run --rm</c> of one service against the stack's current
+    /// compose, pulling its image first. Returns the Update id to poll; the update fails if the service
+    /// exits non-zero.
+    /// </summary>
+    public async Task<string> RunStackServiceAsync(string nameOrId, string service, CancellationToken ct)
+    {
+        // no_tty is left unset: Komodo 2.2 passes it as `--no-tty`, which compose rejects (its flag is
+        // `--no-TTY`). Compose allocates no TTY anyway when the Periphery runs it without a terminal.
+        var update = await ExecuteAsync("RunStackService", new { stack = nameOrId, service, pull = true }, ct);
+        return GetId(update);
     }
 
     /// <summary>Trigger DeployStack; returns the Update id to poll.</summary>

@@ -48,7 +48,12 @@ builder.AddDockerfile("aspire-spike", ".", "Dockerfile")
 // `http://{stack}-api:8080`, and each service gets a stack-unique `container_name` — so on a shared external
 // network this stack can never round-robin onto another stack's `api`. No-op in `aspire run`.
 var internalApi = builder.AddContainer("api", "nginx").WithHttpEndpoint(targetPort: 8080, name: "http");
-builder.AddContainer("worker", "nginx").WithReference(internalApi.GetEndpoint("http"));
+// A run-once service: the worker waits for it to complete successfully. On deploy it runs on its own
+// before the stack is redeployed, and a non-zero exit stops the deploy with the running stack untouched.
+var seed = builder.AddContainer("seed", "busybox").WithArgs("sh", "-c", "echo seeding; exit 0");
+builder.AddContainer("worker", "nginx")
+    .WithReference(internalApi.GetEndpoint("http"))
+    .WaitForCompletion(seed);
 
 // Push built images to your registry (here GHCR); Komodo pulls them via the configured registry account.
 #pragma warning disable ASPIRECOMPUTE003
