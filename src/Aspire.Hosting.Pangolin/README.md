@@ -24,7 +24,9 @@ Configure `Ingress:Domain` (absent = no-op, e.g. local runs), plus optional `Sta
 (subdomain prefix), `Sso`/`SsoIdp`/`WhitelistUsers`, and `ApiUrl`/`ApiKey`/`Org` for teardown.
 
 Per-resource: `WithCustomDomain`, `WithPublicIngress()` (SSO off for one resource),
-`WithIngressUpstreamMethod("h2c")` (gRPC backends), `WithPangolinPublicUrl/Host`.
+`WithIngressUpstreamMethod("h2c")` (gRPC backends), `WithPangolinPublicUrl/Host`, and
+`WithIngressVia(front)`: keep the resource's name and URL but put its labels on a front proxy and route
+to that (for a service that sleeps, whose own labels Pangolin would ignore while it is stopped).
 
 Deploy-target-agnostic — depends only on `Aspire.Hosting` + `Aspire.Hosting.Docker`; pairs with
 (but does not depend on) `Skoging.Aspire.Hosting.Komodo`.

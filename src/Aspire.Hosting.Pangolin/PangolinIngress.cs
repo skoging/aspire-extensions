@@ -29,6 +29,9 @@ namespace Aspire.Hosting.Pangolin;
 /// backends that multiplex gRPC + HTTP on one cleartext port). <c>null</c> = derive from <see cref="Scheme"/>. Distinct from
 /// the resource-level <c>protocol</c> (http|tcp|udp), which says what KIND of resource this is. Set via
 /// <see cref="PangolinIngressExtensions.WithIngressUpstreamMethod{T}"/>.</param>
+/// <param name="Via">The front proxy that carries this endpoint's ingress, set via
+/// <see cref="PangolinIngressExtensions.WithIngressVia{T, TFront}"/>; <c>null</c> = the ingress dials the service
+/// itself.</param>
 internal sealed record IngressTarget(
     string ResourceName,
     string ServiceName,
@@ -37,7 +40,12 @@ internal sealed record IngressTarget(
     int TargetPort,
     string Scheme = "http",
     bool? Sso = null,
-    string? UpstreamMethod = null);
+    string? UpstreamMethod = null,
+    IngressVia? Via = null);
+
+/// <summary>A front proxy that carries another service's ingress: its compose service, the stack-unique name the
+/// ingress dials, and the port it listens on.</summary>
+internal sealed record IngressVia(string ServiceName, string Hostname, int Port);
 
 /// <summary>
 /// Pangolin ingress provider. Stamps <c>pangolin.public-resources.&lt;id&gt;.*</c> labels that a
@@ -117,8 +125,9 @@ public sealed class PangolinIngress
             [$"{p}.protocol"] = protocol,
             [$"{p}.full-domain"] = FullDomain(target),
             [$"{p}.auth.sso-enabled"] = sso ? "true" : "false",
-            [$"{p}.targets[0].hostname"] = target.Hostname,
-            [$"{p}.targets[0].port"] = target.TargetPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            // The resource stays keyed on the service (above); only the backend it dials moves to the front proxy.
+            [$"{p}.targets[0].hostname"] = target.Via?.Hostname ?? target.Hostname,
+            [$"{p}.targets[0].port"] = (target.Via?.Port ?? target.TargetPort).ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
         if (protocol == "http")
         {
@@ -333,6 +342,29 @@ public static class PangolinIngressExtensions
     }
 
     /// <summary>
+    /// Route this resource's external endpoint through <paramref name="front"/>, a proxy that forwards to it — for
+    /// example a scale-to-zero gate that starts the service on the first request. The Pangolin resource keeps this
+    /// resource's name and subdomain, but its labels go on the front proxy's service and its target is the front
+    /// proxy's <paramref name="endpointName"/> endpoint. Only the front proxy joins the ingress network.
+    /// </summary>
+    /// <remarks>
+    /// The labels have to sit on the front proxy because Pangolin ignores the labels of containers that are not
+    /// running: on a service that is stopped while idle they would vanish, and with them the route. Keep the front
+    /// proxy's own endpoints internal, or it is stamped as a second ingress resource.
+    /// </remarks>
+    public static IResourceBuilder<T> WithIngressVia<T, TFront>(
+        this IResourceBuilder<T> builder, IResourceBuilder<TFront> front, string endpointName = "http")
+        where T : IResource
+        where TFront : IResourceWithEndpoints
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(front);
+        ArgumentException.ThrowIfNullOrWhiteSpace(endpointName);
+        builder.Resource.Annotations.Add(new PangolinIngressViaAnnotation(front.Resource, endpointName));
+        return builder;
+    }
+
+    /// <summary>
     /// Wire <paramref name="environmentVariable"/> to this resource's public URL, derived from the model:
     /// in run mode the local http endpoint (e.g. http://localhost:3000); in publish mode the Pangolin URL
     /// https://{subdomain}.{domain} composed from the configured ingress. Avoids hand-maintaining a separate
@@ -475,7 +507,8 @@ public static class PangolinIngressExtensions
                     // Per-resource SSO override (WithPublicIngress); null = provider's stack-wide default.
                     Sso: r.Annotations.OfType<PangolinIngressSsoAnnotation>().FirstOrDefault()?.Sso,
                     // Per-resource upstream-dial scheme (WithIngressUpstreamMethod, e.g. h2c for gRPC backends).
-                    UpstreamMethod: r.Annotations.OfType<PangolinIngressUpstreamMethodAnnotation>().FirstOrDefault()?.Method)))
+                    UpstreamMethod: r.Annotations.OfType<PangolinIngressUpstreamMethodAnnotation>().FirstOrDefault()?.Method,
+                    Via: ResolveVia(r, stackName))))
             .ToList();
         if (targets.Count == 0)
         {
@@ -485,8 +518,20 @@ public static class PangolinIngressExtensions
         var network = ingress.RequiredNetwork;
         foreach (var target in targets)
         {
-            compose = StampServiceForIngress(compose, target.ServiceName, target.Hostname, ingress.GetLabels(target), network, context);
-            context.Logger.LogInformation("Pangolin: ingress — {Resource} → {Url}", target.ResourceName, ingress.GetExternalUrl(target));
+            if (target.Via is { } via)
+            {
+                // The service keeps its stack-unique name (the front proxy dials it); the labels and the ingress
+                // network go on the front proxy.
+                compose = StampService(compose, target.ServiceName, target.Hostname, labels: null, network: null, context.Logger);
+                compose = StampService(compose, via.ServiceName, via.Hostname, ingress.GetLabels(target), network, context.Logger);
+                context.Logger.LogInformation("Pangolin: ingress — {Resource} → {Url} via {Front}",
+                    target.ResourceName, ingress.GetExternalUrl(target), via.ServiceName);
+            }
+            else
+            {
+                compose = StampService(compose, target.ServiceName, target.Hostname, ingress.GetLabels(target), network, context.Logger);
+                context.Logger.LogInformation("Pangolin: ingress — {Resource} → {Url}", target.ResourceName, ingress.GetExternalUrl(target));
+            }
         }
         // Define the provider's external network at the top level (it's joined per-service above).
         if (network is not null && !compose.Contains($"\n  {network}:", StringComparison.Ordinal))
@@ -499,17 +544,35 @@ public static class PangolinIngressExtensions
         context.Logger.LogInformation("Pangolin: stamped {Count} external service(s) in {File}.", targets.Count, ComposeFile);
     }
 
-    /// <summary>Inject a <c>labels:</c> block (and join an external network) into one compose service —
-    /// line-based, so we never re-serialize the YAML (which a downstream deploy target would mangle).</summary>
-    private static string StampServiceForIngress(
-        string compose, string service, string hostname, IReadOnlyDictionary<string, string> labels, string? network, PipelineStepContext context)
+    private static IngressVia? ResolveVia(IResource resource, string stackName)
+    {
+        var annotation = resource.Annotations.OfType<PangolinIngressViaAnnotation>().FirstOrDefault();
+        if (annotation is null)
+        {
+            return null;
+        }
+        var endpoint = annotation.Front.Annotations.OfType<EndpointAnnotation>()
+            .FirstOrDefault(e => e.Name == annotation.EndpointName)
+            ?? throw new InvalidOperationException(
+                $"Pangolin: '{resource.Name}' routes its ingress via '{annotation.Front.Name}', which has no '{annotation.EndpointName}' endpoint.");
+        var service = annotation.Front.Name.ToLowerInvariant();
+        // Same stack-unique name a deploy target stamps on an internal service, so the label and the container agree
+        // whichever runs first.
+        return new IngressVia(service, $"{stackName}-{service}", endpoint.TargetPort ?? endpoint.Port ?? 80);
+    }
+
+    /// <summary>Stamp one compose service for ingress: a stack-unique <c>container_name</c>, and optionally labels
+    /// (merged into an existing <c>labels:</c> map) and an external network — line-based, so we never re-serialize
+    /// the YAML (which a downstream deploy target would mangle).</summary>
+    internal static string StampService(
+        string compose, string service, string hostname, IReadOnlyDictionary<string, string>? labels, string? network, ILogger logger)
     {
         var lines = compose.Split('\n').ToList();
         var prefix = $"  {service}:";
         var header = lines.FindIndex(l => l.StartsWith(prefix, StringComparison.Ordinal) && l[prefix.Length..].Trim().Length == 0);
         if (header < 0)
         {
-            context.Logger.LogWarning("Pangolin: ingress — service '{Service}' not found in compose; labels skipped.", service);
+            logger.LogWarning("Pangolin: ingress — service '{Service}' not found in compose; labels skipped.", service);
             return compose;
         }
         // Block end = next non-blank line indented <= 2 (a sibling service or a top-level key).
@@ -572,7 +635,7 @@ public static class PangolinIngressExtensions
             }
             else
             {
-                context.Logger.LogWarning("Pangolin: ingress — service '{Service}' has no networks: block; '{Net}' not joined.", service, network);
+                logger.LogWarning("Pangolin: ingress — service '{Service}' has no networks: block; '{Net}' not joined.", service, network);
             }
         }
         // Inject a stack-unique container_name + the labels block right after the service header. The
@@ -587,15 +650,38 @@ public static class PangolinIngressExtensions
                 break;
             }
         }
+        // A second `labels:` key would be a duplicate YAML key, so labels the compose already declares (a
+        // PublishAsDockerComposeService customization, say) are extended in place.
+        var labelLines = labels?.Select(kv => $"      {kv.Key}: \"{kv.Value}\"").ToList() ?? [];
+        var labelsIdx = -1;
+        for (var i = header + 1; i < end; i++)
+        {
+            if (lines[i].TrimEnd() == "    labels:")
+            {
+                labelsIdx = i;
+                break;
+            }
+        }
+        if (labelsIdx >= 0 && labelLines.Count > 0)
+        {
+            var insertAt = labelsIdx + 1;
+            while (insertAt < end && lines[insertAt].Trim().Length != 0 &&
+                   lines[insertAt].Length - lines[insertAt].TrimStart(' ').Length > 4)
+            {
+                insertAt++;
+            }
+            lines.InsertRange(insertAt, labelLines);
+            labelLines.Clear();
+        }
         var inject = new List<string>();
         if (!hasContainerName)
         {
             inject.Add($"    container_name: {hostname}");
         }
-        inject.Add("    labels:");
-        foreach (var kv in labels)
+        if (labelLines.Count > 0)
         {
-            inject.Add($"      {kv.Key}: \"{kv.Value}\"");
+            inject.Add("    labels:");
+            inject.AddRange(labelLines);
         }
         lines.InsertRange(header + 1, inject);
         return string.Join("\n", lines);
@@ -656,4 +742,11 @@ internal sealed class PangolinIngressSsoAnnotation(bool sso) : IResourceAnnotati
 internal sealed class PangolinIngressUpstreamMethodAnnotation(string method) : IResourceAnnotation
 {
     public string Method { get; } = method;
+}
+
+/// <summary>Carries the front proxy a resource's ingress is routed through (<c>WithIngressVia</c>).</summary>
+internal sealed class PangolinIngressViaAnnotation(IResourceWithEndpoints front, string endpointName) : IResourceAnnotation
+{
+    public IResourceWithEndpoints Front { get; } = front;
+    public string EndpointName { get; } = endpointName;
 }

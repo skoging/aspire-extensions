@@ -34,6 +34,9 @@ Highlights:
   match (`http://{stack}-api:8080`), so stacks sharing an external docker network can never
   round-robin onto each other's services. Externally-exposed services are left to the ingress
   provider; no hand-pinned service URLs needed.
+- **Services stopped on purpose** — `resource.ExcludeFromKomodoStackState()` leaves a service that
+  is stopped by design (scaled to zero while idle) out of the stack's state, as run-once services
+  already are, so the stack doesn't read Unhealthy and alert every time it stops.
 
 Pairs with (but does not depend on) `Skoging.Aspire.Hosting.Pangolin` for ingress.
 Full docs: https://github.com/skoging/aspire-extensions

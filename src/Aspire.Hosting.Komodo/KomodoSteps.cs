@@ -38,7 +38,7 @@ internal static class KomodoSteps
         var compose = await File.ReadAllTextAsync(composePath, context.CancellationToken);
         var tomlPath = Path.Combine(outDir, $"komodo-{name}.toml");
         await File.WriteAllTextAsync(tomlPath,
-            KomodoResyncToml.Render(name, options.ServerName ?? "local", compose, KomodoRunOnce.FindServices(compose)),
+            KomodoResyncToml.Render(name, options.ServerName ?? "local", compose, KomodoIgnoredServices.Resolve(context.Model, compose)),
             context.CancellationToken);
         context.Logger.LogInformation("Komodo: wrote Resource-Sync TOML -> {Path}", tomlPath);
     }
@@ -150,7 +150,7 @@ internal static class KomodoSteps
         context.Logger.LogInformation("Komodo: upserting stack '{Stack}' on '{Server}'…", name, serverName);
         await client.UpsertStackAsync(name, serverId, resolvedCompose, ct,
             registryProvider: options.RegistryProvider, registryAccount: options.RegistryAccount,
-            composeCmdWrapper: composeWrapper, ignoreServices: runOnce);
+            composeCmdWrapper: composeWrapper, ignoreServices: KomodoIgnoredServices.Resolve(context.Model, resolvedCompose));
         if (!string.IsNullOrEmpty(options.RegistryAccount))
         {
             context.Logger.LogInformation("Komodo: stack pulls private images via registry account '{Account}' ({Provider}).",

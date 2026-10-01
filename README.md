@@ -72,6 +72,9 @@ Config (user-secrets locally, `Komodo__*` env in CI):
   failure leaves the running containers untouched. Inside a plain `compose up`, the dependent would
   already have been replaced by then. `up` runs the service again, so it must be idempotent. Komodo
   leaves these services out of the stack status (`ignore_services`), since they exit by design.
+- **Services stopped on purpose** (scaled to zero while idle, say): `resource.ExcludeFromKomodoStackState()`
+  adds them to `ignore_services` too. Komodo derives stack state from container state, so otherwise
+  the stack reads Unhealthy, and alerts, every time one stops.
 - **Existing resources**: `postgres.PublishAsExisting(connectionString, network)` (and
   `RunAsExisting`/`AsExisting`, mirroring the Azure trio) redirect dependents to an
   already-running instance instead of deploying a fresh container.
@@ -96,12 +99,18 @@ runs), `StackName` (subdomain prefix; defaults to the environment name), `Sso`, 
 
 Per-resource: `WithCustomDomain("sub")`, `WithPublicIngress()` (SSO off for one resource — e.g. an
 IdP that must stay reachable un-gated), `WithIngressUpstreamMethod("h2c")` (gRPC backends),
-`WithPangolinPublicUrl/Host(envVar)`.
+`WithIngressVia(front)` (see below), `WithPangolinPublicUrl/Host(envVar)`.
 
 Each externally-exposed service gets: the `pangolin.public-resources.<stack>-<name>.*` labels, a
 stack-unique `container_name`, membership in the ingress network, and its host-published ports
 dropped (the ingress is the entry point). Your newt instance picks the labels up from the docker
 socket and registers the Pangolin resources.
+
+`web.WithIngressVia(gate)` routes web's ingress through `gate`, a proxy in front of it (for example a
+scale-to-zero gate that starts web on the first request). The Pangolin resource keeps web's name and
+subdomain, so its URL doesn't change, but the labels and the ingress network go on the gate and the
+route targets the gate's endpoint. Pangolin ignores the labels of stopped containers, so on a service
+that sleeps they would take the route with them. Keep the gate's own endpoints internal.
 
 ## Local testing
 
