@@ -100,6 +100,16 @@ public static class KomodoExtensions
                     internalStamp.DependsOnSteps.Add(ingressStamp.Name);
                 }
 
+                // Delete the ingress routes only once the stack is down. A label-driven ingress (Pangolin's newt)
+                // re-creates a route from the labels of any container still running, and never removes one on its
+                // own, so a teardown racing the destroy leaves the route behind for good.
+                var ingressTeardown = context.Steps.FirstOrDefault(s => string.Equals(s.Name, $"pangolin-teardown-{name}", StringComparison.Ordinal));
+                var destroy = context.Steps.FirstOrDefault(s => string.Equals(s.Name, $"komodo-destroy-{name}", StringComparison.Ordinal));
+                if (ingressTeardown is not null && destroy is not null && !ingressTeardown.DependsOnSteps.Contains(destroy.Name))
+                {
+                    ingressTeardown.DependsOnSteps.Add(destroy.Name);
+                }
+
                 return Task.CompletedTask;
             });
     }
