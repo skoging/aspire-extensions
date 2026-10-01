@@ -174,7 +174,7 @@ internal static class KomodoSteps
             {
                 throw new InvalidOperationException(
                     $"Komodo: run-once service '{service}' did not complete, so stack '{name}' was not " +
-                    $"redeployed and its running containers are untouched. Its output is in Komodo update {runId}.",
+                    $"redeployed and its running containers are untouched. {ex.Message}",
                     ex);
             }
         }

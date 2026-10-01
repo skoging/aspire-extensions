@@ -1,6 +1,8 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace Aspire.Hosting.Komodo;
 
@@ -9,7 +11,7 @@ namespace Aspire.Hosting.Komodo;
 /// <c>POST {core}/{read|write|execute} {"type","params"}</c> with
 /// <c>X-Api-Key</c> / <c>X-Api-Secret</c> headers; responses are the raw typed JSON.
 /// </summary>
-internal sealed class KomodoApiClient
+internal sealed partial class KomodoApiClient
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -178,7 +180,7 @@ internal sealed class KomodoApiClient
                 var success = u.TryGetProperty("success", out var sv) && sv.ValueKind == JsonValueKind.True;
                 if (!success)
                 {
-                    throw new InvalidOperationException($"Komodo update {updateId} completed but failed: {Truncate(u.ToString(), 500)}");
+                    throw new InvalidOperationException(DescribeFailure(updateId, u));
                 }
                 return;
             }
@@ -186,6 +188,50 @@ internal sealed class KomodoApiClient
         }
         throw new TimeoutException($"Komodo update {updateId} did not complete within {timeout}.");
     }
+
+    /// <summary>
+    /// The failed stages of a completed, unsuccessful update: each one's name, command and output (stderr, else
+    /// stdout). The update document's own JSON buries that output inside escaped, HTML-marked-up strings, and its
+    /// first stage (secret interpolation) is long enough to push the failing one out of any truncated view.
+    /// </summary>
+    internal static string DescribeFailure(string updateId, JsonElement update)
+    {
+        var operation = GetString(update, "operation") ?? "update";
+        var failed = new List<string>();
+        if (update.TryGetProperty("logs", out var logs) && logs.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var log in logs.EnumerateArray())
+            {
+                if (log.TryGetProperty("success", out var ok) && ok.ValueKind == JsonValueKind.True)
+                {
+                    continue;
+                }
+                var output = PlainText(GetString(log, "stderr"));
+                if (output.Length == 0)
+                {
+                    output = PlainText(GetString(log, "stdout"));
+                }
+                var command = GetString(log, "command");
+                failed.Add(
+                    $"stage '{GetString(log, "stage")}'"
+                    + (string.IsNullOrWhiteSpace(command) ? "" : $" ($ {command})")
+                    + $":\n{TruncateStart(output, 4000)}");
+            }
+        }
+        return failed.Count == 0
+            ? $"Komodo {operation} {updateId} failed: {Truncate(update.ToString(), 500)}"
+            : $"Komodo {operation} {updateId} failed at {string.Join("\n", failed)}";
+    }
+
+    // Komodo marks up log output with HTML spans; strip them so the text reads as the command printed it.
+    private static string PlainText(string? s) =>
+        string.IsNullOrEmpty(s) ? "" : WebUtility.HtmlDecode(HtmlTag().Replace(s, "")).Trim();
+
+    [GeneratedRegex("<[^>]+>")]
+    private static partial Regex HtmlTag();
+
+    // Keep the end: a command's error comes after its progress output.
+    private static string TruncateStart(string s, int n) => s.Length <= n ? s : "…" + s[^n..];
 
     // Komodo ids: "id" (string) on list items, or "_id":{"$oid":...} on full documents.
     private static string GetId(JsonElement e)
