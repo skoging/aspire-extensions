@@ -11,5 +11,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Aspire.Hosting.Komodo\Aspire.Hosting.Komodo.csproj" />
+    <ProjectReference Include="..\..\src\Aspire.Hosting.Pangolin\Aspire.Hosting.Pangolin.csproj" />
   </ItemGroup>
 </Project>
