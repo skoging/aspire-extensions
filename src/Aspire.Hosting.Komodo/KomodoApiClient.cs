@@ -137,6 +137,17 @@ internal sealed partial class KomodoApiClient
         }
     }
 
+    public async Task<HashSet<string>> ListVariableNamesAsync(CancellationToken ct)
+    {
+        var variables = await ReadAsync("ListVariables", new { }, ct);
+        return variables.EnumerateArray()
+            .Select(v => GetString(v, "name"))
+            .OfType<string>()
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    public Task DeleteVariableAsync(string name, CancellationToken ct) => WriteAsync("DeleteVariable", new { name }, ct);
+
     /// <summary>
     /// Trigger RunStackService: <c>docker compose run --rm</c> of one service against the stack's current
     /// compose, pulling its image first. Returns the Update id to poll; the update fails if the service

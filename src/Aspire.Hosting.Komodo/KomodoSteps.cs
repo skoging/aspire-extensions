@@ -105,10 +105,7 @@ internal static class KomodoSteps
         // flow char). Secrets are still registered as is_secret Komodo Variables (the vault + detection is
         // proven); they're just referenced inline for now. Flip inline -> [[var]] once Komodo's env
         // interpolation no longer mangles the compose.
-        var secretKeys = context.Model.Resources.OfType<ParameterResource>()
-            .Where(p => p.Secret)
-            .Select(p => p.Name.ToUpperInvariant().Replace("-", "_"))
-            .ToHashSet(StringComparer.Ordinal);
+        var secretKeys = SecretKeys(context.Model).ToHashSet(StringComparer.Ordinal);
         context.Logger.LogInformation("Komodo: {Count} secret param(s) detected: {Keys}", secretKeys.Count, string.Join(", ", secretKeys));
         var (resolvedCompose, secrets) = ResolveComposeInline(compose, resolvedEnv, secretKeys, context);
 
@@ -134,7 +131,7 @@ internal static class KomodoSteps
             name, secrets,
             async (key, value, token) =>
             {
-                var varName = $"{name}_{key}".ToLowerInvariant().Replace("-", "_");
+                var varName = SecretVariableName(name, key);
                 await client.UpsertVariableAsync(varName, value, true, token);
                 return $"[[{varName}]]";
             },
@@ -217,6 +214,7 @@ internal static class KomodoSteps
         if (existingId is null)
         {
             context.Logger.LogInformation("Komodo: stack '{Stack}' not found — nothing to destroy.", name);
+            await DeleteSecretVariablesAsync(context, client, name);
             return;
         }
 
@@ -237,6 +235,34 @@ internal static class KomodoSteps
         }
         await client.DeleteStackAsync(existingId, ct);
         context.Logger.LogInformation("Komodo: stack '{Stack}' destroyed + deleted.", name);
+        await DeleteSecretVariablesAsync(context, client, name);
+    }
+
+    /// <summary>The env keys of the model's secret parameters, as they appear in the compose.</summary>
+    internal static IEnumerable<string> SecretKeys(DistributedApplicationModel model) =>
+        model.Resources.OfType<ParameterResource>()
+            .Where(p => p.Secret)
+            .Select(p => p.Name.ToUpperInvariant().Replace("-", "_"));
+
+    /// <summary>
+    /// The Komodo Variable a deploy vaults a secret in. Destroy deletes by these exact names, never by prefix:
+    /// the prefix of stack <c>app</c> also matches every variable of a stack named <c>app-x</c>.
+    /// </summary>
+    internal static string SecretVariableName(string stack, string key) =>
+        $"{stack}_{key}".ToLowerInvariant().Replace("-", "_");
+
+    // Removes the Variables the deploy vaulted this stack's secrets in; otherwise each destroyed stack leaves its
+    // secret values behind in Komodo. Runs even when the stack is already gone, so a retry finishes the job.
+    private static async Task DeleteSecretVariablesAsync(PipelineStepContext context, KomodoApiClient client, string stack)
+    {
+        var existing = await client.ListVariableNamesAsync(context.CancellationToken);
+        var deleted = 0;
+        foreach (var variable in SecretKeys(context.Model).Select(k => SecretVariableName(stack, k)).Where(existing.Contains))
+        {
+            await client.DeleteVariableAsync(variable, context.CancellationToken);
+            deleted++;
+        }
+        context.Logger.LogInformation("Komodo: deleted {Count} secret variable(s) of stack '{Stack}'.", deleted, stack);
     }
 
     /// <summary>
