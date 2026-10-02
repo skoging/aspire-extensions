@@ -18,7 +18,16 @@ public class PangolinTeardownTests
         var api = new StubPangolin(Enumerable.Range(1, 45).Select(i => ($"other-{i:D2}", i)).Append(("demo-web", 99)), pageSize: 20);
 
         Assert.True(await Ingress().TeardownAsync(new HttpClient(api), "demo-web", default));
-        Assert.Equal("/v1/resource/99", api.Deleted);
+        Assert.Equal(["/v1/resource/99"], api.Deleted);
+    }
+
+    [Fact]
+    public async Task DeletesEveryResourceWithTheNiceId()
+    {
+        var api = new StubPangolin([("demo-web", 1), ("other", 2), ("demo-web", 3)], pageSize: 20);
+
+        Assert.True(await Ingress().TeardownAsync(new HttpClient(api), "demo-web", default));
+        Assert.Equal(["/v1/resource/1", "/v1/resource/3"], api.Deleted);
     }
 
     [Fact]
@@ -27,7 +36,7 @@ public class PangolinTeardownTests
         var api = new StubPangolin([("demo-web-old", 1), ("demo-website", 2)], pageSize: 20);
 
         Assert.False(await Ingress().TeardownAsync(new HttpClient(api), "demo-web", default));
-        Assert.Null(api.Deleted);
+        Assert.Empty(api.Deleted);
     }
 
     [Fact]
@@ -43,7 +52,7 @@ public class PangolinTeardownTests
     {
         private readonly List<(string NiceId, int Id)> _resources = resources.ToList();
 
-        public string? Deleted { get; private set; }
+        public List<string> Deleted { get; } = [];
         public int Requests { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
@@ -51,7 +60,7 @@ public class PangolinTeardownTests
             Requests++;
             if (request.Method == HttpMethod.Delete)
             {
-                Deleted = request.RequestUri!.AbsolutePath;
+                Deleted.Add(request.RequestUri!.AbsolutePath);
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
             }
             var page = int.Parse(
