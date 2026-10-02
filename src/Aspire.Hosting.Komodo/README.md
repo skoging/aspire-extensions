@@ -38,7 +38,7 @@ Highlights:
   deploy runs `compose down` first and containers are created under their final names instead of being
   recreated under a temporary `<id>_<name>` and renamed. Tools that track containers by name (a scale-to-zero
   proxy, say) can miss that rename. The stack is down while it redeploys (and stays down if `up` fails), and
-  anonymous volumes don't carry over, so use it only where that's fine. Unset leaves the stack's own setting.
+  anonymous volumes don't carry over, so use it only where that's fine. Unset leaves the stack's own setting, so to turn it off again set it to `false` rather than removing it.
 - **Services stopped on purpose** — `resource.ExcludeFromKomodoStackState()` leaves a service that
   is stopped by design (scaled to zero while idle) out of the stack's state, as run-once services
   already are, so the stack doesn't read Unhealthy and alert every time it stops.

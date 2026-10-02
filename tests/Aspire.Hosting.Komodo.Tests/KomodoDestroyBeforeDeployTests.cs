@@ -13,6 +13,7 @@ public class KomodoDestroyBeforeDeployTests
     [InlineData("true", true)]
     [InlineData("false", false)]
     [InlineData(null, null)]
+    [InlineData("", null)]
     public void BindsFromTheKomodoSectionThroughWithKomodoDeploySupport(string? configured, bool? expected)
     {
         var builder = DistributedApplication.CreateBuilder();
@@ -62,6 +63,28 @@ public class KomodoDestroyBeforeDeployTests
         {
             Assert.False(config.TryGetProperty("destroy_before_deploy", out _));
         }
+    }
+
+    [Fact]
+    public async Task AddsTheFieldWithoutChangingTheRestOfTheConfig()
+    {
+        async Task<JsonElement> ConfigSent(bool? destroyBeforeDeploy)
+        {
+            var komodo = new StubKomodo(stackExists: true);
+            var client = new KomodoApiClient(new HttpClient(komodo), "http://komodo.test", "key", "secret");
+            await client.UpsertStackAsync("demo", "server-1", "services: {}\n", default,
+                registryProvider: "ghcr.io", composeCmdWrapper: "wrap [[COMPOSE_COMMAND]]", ignoreServices: ["migrate"],
+                destroyBeforeDeploy: destroyBeforeDeploy);
+            return komodo.Bodies.Single(b => b.GetProperty("type").GetString() == "UpdateStack")
+                .GetProperty("params").GetProperty("config");
+        }
+
+        var without = await ConfigSent(null);
+        var with = await ConfigSent(true);
+
+        var rest = with.EnumerateObject().Where(p => p.Name != "destroy_before_deploy")
+            .ToDictionary(p => p.Name, p => p.Value.GetRawText());
+        Assert.Equal(without.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetRawText()), rest);
     }
 
     private sealed class StubKomodo(bool stackExists) : HttpMessageHandler

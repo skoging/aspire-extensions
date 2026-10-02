@@ -53,7 +53,8 @@ public sealed class KomodoDeployOptions
     /// Sets the stack's <c>destroy_before_deploy</c>: when true, each deploy runs <c>docker compose down</c> before
     /// <c>up</c>, so containers are created under their final names. An in-place <c>up</c> recreates a changed
     /// container under a temporary <c>&lt;id&gt;_&lt;name&gt;</c> and renames it, which tools that follow containers
-    /// by name can miss. <c>null</c> (the default) leaves whatever the stack already has, e.g. set in Komodo's UI.
+    /// by name can miss. <c>null</c> (the default) leaves whatever the stack already has, e.g. set in Komodo's UI, so
+    /// turning it off on a stack deployed with <c>true</c> takes an explicit <c>false</c>; removing the setting is not enough.
     /// </summary>
     /// <remarks>
     /// Costs of <c>true</c>: the stack is down while it redeploys, and stays down if the <c>up</c> fails. Data in
