@@ -116,7 +116,8 @@ public static class KomodoExtensions
 
     /// <summary>
     /// Config-driven overload: binds <see cref="KomodoDeployOptions"/>'s scalar settings
-    /// (CoreUrl/ApiKey/ApiSecret/ServerName/StackName/RegistryProvider/RegistryAccount) from
+    /// (CoreUrl/ApiKey/ApiSecret/ServerName/StackName/RegistryProvider/RegistryAccount/EmitResourceSyncToml/
+    /// UpdateTimeout/DestroyBeforeDeploy) from
     /// <paramref name="section"/>, then applies the optional <paramref name="configure"/> for code overrides.
     /// The interface-typed <c>SecretProvider</c> is not bound — it keeps its default (Komodo Variables).
     /// The HTTP routing/ingress plane lives in a separate, independent package; install it from there.
