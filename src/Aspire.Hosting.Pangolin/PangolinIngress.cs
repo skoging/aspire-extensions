@@ -157,17 +157,19 @@ public sealed class PangolinIngress
     /// it explicitly via the Integration API. No-op unless apiUrl/apiKey/org are all configured. REMOVE this
     /// method + its caller once #1864 / its linked feature request lands and newt reconciles.
     /// </summary>
-    public async Task TeardownAsync(HttpClient http, string niceId, CancellationToken ct)
+    /// <returns><c>true</c> when a resource was found and deleted; <c>false</c> when there was nothing to delete
+    /// (no such resource, or the Integration API is not configured).</returns>
+    public async Task<bool> TeardownAsync(HttpClient http, string niceId, CancellationToken ct)
     {
         if (_apiUrl is null || _apiKey is null || _org is null)
         {
-            return;
+            return false;
         }
 
         var resourceId = await FindResourceIdAsync(http, niceId, ct);
         if (resourceId is null)
         {
-            return; // already gone
+            return false;
         }
 
         using var del = new HttpRequestMessage(HttpMethod.Delete, $"{_apiUrl}/v1/resource/{resourceId}");
@@ -178,27 +180,47 @@ public sealed class PangolinIngress
         {
             resp.EnsureSuccessStatusCode();
         }
+        return resp.StatusCode is not HttpStatusCode.NotFound;
     }
 
+    // The list endpoint pages (20 per page by default, sorted by name), so reading only the first page misses
+    // the resource once the org has more than a page of them. `query` narrows the list server-side (it matches
+    // name, niceId or domain as a substring); walk every page of what it returns and match niceId exactly.
     private async Task<int?> FindResourceIdAsync(HttpClient http, string niceId, CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Get, $"{_apiUrl}/v1/org/{_org}/resources");
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
-        using var resp = await http.SendAsync(req, ct);
-        resp.EnsureSuccessStatusCode();
-        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
-        if (!doc.RootElement.TryGetProperty("data", out var data) ||
-            !data.TryGetProperty("resources", out var resources) ||
-            resources.ValueKind != JsonValueKind.Array)
+        const int pageSize = 100;
+        for (var page = 1; page <= 1000; page++)
         {
-            return null;
-        }
-        foreach (var r in resources.EnumerateArray())
-        {
-            if (r.TryGetProperty("niceId", out var n) && n.GetString() == niceId &&
-                r.TryGetProperty("resourceId", out var id) && id.TryGetInt32(out var rid))
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                $"{_apiUrl}/v1/org/{_org}/resources?query={Uri.EscapeDataString(niceId)}&pageSize={pageSize}&page={page}");
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+            using var resp = await http.SendAsync(req, ct);
+            resp.EnsureSuccessStatusCode();
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            if (!doc.RootElement.TryGetProperty("data", out var data) ||
+                !data.TryGetProperty("resources", out var resources) ||
+                resources.ValueKind != JsonValueKind.Array)
             {
-                return rid;
+                return null;
+            }
+            foreach (var r in resources.EnumerateArray())
+            {
+                if (r.TryGetProperty("niceId", out var n) && n.GetString() == niceId &&
+                    r.TryGetProperty("resourceId", out var id) && id.TryGetInt32(out var rid))
+                {
+                    return rid;
+                }
+            }
+            // Stop on the server's own count when it reports one; it may cap pageSize below what was asked.
+            var count = resources.GetArrayLength();
+            var done = data.TryGetProperty("pagination", out var pg) &&
+                       pg.TryGetProperty("total", out var total) && total.TryGetInt32(out var t) &&
+                       pg.TryGetProperty("pageSize", out var size) && size.TryGetInt32(out var ps)
+                ? page * ps >= t
+                : count < pageSize;
+            if (count == 0 || done)
+            {
+                return null;
             }
         }
         return null;
@@ -706,8 +728,15 @@ public static class PangolinIngressExtensions
             var niceId = $"{stackName}-{r.Name.ToLowerInvariant()}";
             try
             {
-                await ingress.TeardownAsync(http, niceId, ct);
-                context.Logger.LogInformation("Pangolin: ingress — deleted resource '{NiceId}'.", niceId);
+                if (await ingress.TeardownAsync(http, niceId, ct))
+                {
+                    context.Logger.LogInformation("Pangolin: ingress — deleted resource '{NiceId}'.", niceId);
+                }
+                else
+                {
+                    context.Logger.LogInformation(
+                        "Pangolin: ingress — nothing deleted for '{NiceId}' (no such resource, or no Integration API configured).", niceId);
+                }
             }
             catch (Exception ex)
             {
