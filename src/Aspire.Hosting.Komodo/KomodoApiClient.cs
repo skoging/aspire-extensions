@@ -83,7 +83,7 @@ internal sealed partial class KomodoApiClient
     /// <summary>Create-or-update a Stack with inline compose content + resolved environment (idempotent).</summary>
     public async Task UpsertStackAsync(string name, string serverId, string composeYaml, CancellationToken ct,
         string? environment = null, string? registryProvider = null, string? registryAccount = null,
-        string? composeCmdWrapper = null, IReadOnlyList<string>? ignoreServices = null, bool destroyBeforeDeploy = false)
+        string? composeCmdWrapper = null, IReadOnlyList<string>? ignoreServices = null, bool? destroyBeforeDeploy = null)
     {
         // `environment` is a .env-style string Komodo hands to `docker compose` for ${VAR} interpolation.
         // registry_provider/registry_account point the Periphery at a Komodo Docker Registry Account so it
@@ -111,16 +111,19 @@ internal sealed partial class KomodoApiClient
                 : new[] { "up", "down", "pull", "build", "run" },
             // Run-once services exit by design; counted in the stack status, they mark it unhealthy.
             ignore_services = ignoreServices ?? Array.Empty<string>(),
-            destroy_before_deploy = destroyBeforeDeploy,
         };
+        // Sent only when configured: omitting it leaves a value set outside this deploy (Komodo's UI, a sync) alone.
+        object payload = destroyBeforeDeploy is { } destroy
+            ? WithField(config, "destroy_before_deploy", destroy)
+            : config;
         var existingId = await FindStackIdAsync(name, ct);
         if (existingId is null)
         {
-            await WriteAsync("CreateStack", new { name, config }, ct);
+            await WriteAsync("CreateStack", new { name, config = payload }, ct);
         }
         else
         {
-            await WriteAsync("UpdateStack", new { id = existingId, config }, ct);
+            await WriteAsync("UpdateStack", new { id = existingId, config = payload }, ct);
         }
     }
 
@@ -244,6 +247,14 @@ internal sealed partial class KomodoApiClient
 
     // Keep the end: a command's error comes after its progress output.
     private static string TruncateStart(string s, int n) => s.Length <= n ? s : "…" + s[^n..];
+
+    private static Dictionary<string, object?> WithField(object config, string name, object value)
+    {
+        var fields = JsonSerializer.SerializeToElement(config, JsonOpts).EnumerateObject()
+            .ToDictionary(p => p.Name, p => (object?)p.Value.Clone());
+        fields[name] = value;
+        return fields;
+    }
 
     // Komodo ids: "id" (string) on list items, or "_id":{"$oid":...} on full documents.
     private static string GetId(JsonElement e)

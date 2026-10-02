@@ -50,13 +50,17 @@ public sealed class KomodoDeployOptions
     public ISecretProvider SecretProvider { get; set; } = new KomodoVariablesSecretProvider();
 
     /// <summary>
-    /// When true, each deploy takes the stack down (<c>docker compose down</c>) before bringing it up, the stack's
-    /// <c>destroy_before_deploy</c> setting. Containers are then created under their final names, where an in-place
-    /// <c>compose up</c> recreates them under a temporary <c>&lt;id&gt;_&lt;name&gt;</c> and renames them, which tools
-    /// that follow containers by name can miss. The cost is the stack being down while it redeploys, so it suits
-    /// stacks that can take that (short-lived or scaled-to-zero deploys), not ones that must stay up. Defaults to false.
+    /// Sets the stack's <c>destroy_before_deploy</c>: when true, each deploy runs <c>docker compose down</c> before
+    /// <c>up</c>, so containers are created under their final names. An in-place <c>up</c> recreates a changed
+    /// container under a temporary <c>&lt;id&gt;_&lt;name&gt;</c> and renames it, which tools that follow containers
+    /// by name can miss. <c>null</c> (the default) leaves whatever the stack already has, e.g. set in Komodo's UI.
     /// </summary>
-    public bool DestroyBeforeDeploy { get; set; }
+    /// <remarks>
+    /// Costs of <c>true</c>: the stack is down while it redeploys, and stays down if the <c>up</c> fails. Data in
+    /// anonymous volumes (an image's <c>VOLUME</c> with no named volume mounted over it) does not carry over to the
+    /// new container; named volumes and bind mounts do, since Komodo's <c>down</c> doesn't remove volumes.
+    /// </remarks>
+    public bool? DestroyBeforeDeploy { get; set; }
 
     /// <summary>
     /// How long each Komodo update may take: every run-once service's run, then the stack deploy. The deploy

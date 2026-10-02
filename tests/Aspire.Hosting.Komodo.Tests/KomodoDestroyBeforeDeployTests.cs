@@ -9,41 +9,62 @@ namespace Aspire.Hosting.Komodo.Tests;
 /// <summary>Covers the stack's destroy_before_deploy setting, from configuration to the Komodo API.</summary>
 public class KomodoDestroyBeforeDeployTests
 {
-    [Fact]
-    public void BindsFromTheKomodoSection()
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("false", false)]
+    [InlineData(null, null)]
+    public void BindsFromTheKomodoSectionThroughWithKomodoDeploySupport(string? configured, bool? expected)
     {
-        var options = new KomodoDeployOptions();
-        new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["DestroyBeforeDeploy"] = "true" })
-            .Build()
-            .Bind(options);
+        var builder = DistributedApplication.CreateBuilder();
+        if (configured is not null)
+        {
+            builder.Configuration["Komodo:DestroyBeforeDeploy"] = configured;
+        }
 
-        Assert.True(options.DestroyBeforeDeploy);
-        Assert.False(new KomodoDeployOptions().DestroyBeforeDeploy);
+        var compose = builder.AddDockerComposeEnvironment("compose")
+            .WithKomodoDeploySupport(builder.Configuration.GetSection("Komodo"));
+
+        var options = compose.Resource.Annotations.OfType<KomodoDeployAnnotation>().Single().Options;
+        Assert.Equal(expected, options.DestroyBeforeDeploy);
     }
 
     [Fact]
-    public void ResourceSyncTomlCarriesItOnlyWhenSet()
+    public void ResourceSyncTomlCarriesItOnlyWhenConfigured()
     {
         Assert.Contains("destroy_before_deploy = true", KomodoResyncToml.Render("demo", "local", "services: {}\n", destroyBeforeDeploy: true));
+        Assert.Contains("destroy_before_deploy = false", KomodoResyncToml.Render("demo", "local", "services: {}\n", destroyBeforeDeploy: false));
         Assert.DoesNotContain("destroy_before_deploy", KomodoResyncToml.Render("demo", "local", "services: {}\n"));
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task SendsItInTheStackConfig(bool destroyBeforeDeploy)
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    [InlineData(false, null)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(true, null)]
+    public async Task SendsItOnCreateAndUpdateOnlyWhenConfigured(bool stackExists, bool? destroyBeforeDeploy)
     {
-        var komodo = new StubKomodo();
+        var komodo = new StubKomodo(stackExists);
         var client = new KomodoApiClient(new HttpClient(komodo), "http://komodo.test", "key", "secret");
 
         await client.UpsertStackAsync("demo", "server-1", "services: {}\n", default, destroyBeforeDeploy: destroyBeforeDeploy);
 
-        var create = Assert.Single(komodo.Bodies, b => b.GetProperty("type").GetString() == "CreateStack");
-        Assert.Equal(destroyBeforeDeploy, create.GetProperty("params").GetProperty("config").GetProperty("destroy_before_deploy").GetBoolean());
+        var write = Assert.Single(komodo.Bodies, b => b.GetProperty("type").GetString() is "CreateStack" or "UpdateStack");
+        Assert.Equal(stackExists ? "UpdateStack" : "CreateStack", write.GetProperty("type").GetString());
+        var config = write.GetProperty("params").GetProperty("config");
+        Assert.Equal("services: {}\n", config.GetProperty("file_contents").GetString());
+        if (destroyBeforeDeploy is { } expected)
+        {
+            Assert.Equal(expected, config.GetProperty("destroy_before_deploy").GetBoolean());
+        }
+        else
+        {
+            Assert.False(config.TryGetProperty("destroy_before_deploy", out _));
+        }
     }
 
-    private sealed class StubKomodo : HttpMessageHandler
+    private sealed class StubKomodo(bool stackExists) : HttpMessageHandler
     {
         public List<JsonElement> Bodies { get; } = [];
 
@@ -51,7 +72,9 @@ public class KomodoDestroyBeforeDeployTests
         {
             var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct)).RootElement.Clone();
             Bodies.Add(body);
-            var reply = body.GetProperty("type").GetString() == "ListStacks" ? "[]" : "{}";
+            var reply = body.GetProperty("type").GetString() == "ListStacks"
+                ? stackExists ? """[{"name":"demo","id":"s1"}]""" : "[]"
+                : "{}";
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(reply) };
         }
     }
