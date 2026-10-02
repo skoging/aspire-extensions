@@ -50,6 +50,15 @@ public sealed class KomodoDeployOptions
     public ISecretProvider SecretProvider { get; set; } = new KomodoVariablesSecretProvider();
 
     /// <summary>
+    /// When true, each deploy takes the stack down (<c>docker compose down</c>) before bringing it up, the stack's
+    /// <c>destroy_before_deploy</c> setting. Containers are then created under their final names, where an in-place
+    /// <c>compose up</c> recreates them under a temporary <c>&lt;id&gt;_&lt;name&gt;</c> and renames them, which tools
+    /// that follow containers by name can miss. The cost is the stack being down while it redeploys, so it suits
+    /// stacks that can take that (short-lived or scaled-to-zero deploys), not ones that must stay up. Defaults to false.
+    /// </summary>
+    public bool DestroyBeforeDeploy { get; set; }
+
+    /// <summary>
     /// How long each Komodo update may take: every run-once service's run, then the stack deploy. The deploy
     /// includes pulling images and <c>docker compose up</c> waiting on its dependencies. Defaults to 3 minutes.
     /// </summary>

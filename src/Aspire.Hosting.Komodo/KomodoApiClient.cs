@@ -83,7 +83,7 @@ internal sealed partial class KomodoApiClient
     /// <summary>Create-or-update a Stack with inline compose content + resolved environment (idempotent).</summary>
     public async Task UpsertStackAsync(string name, string serverId, string composeYaml, CancellationToken ct,
         string? environment = null, string? registryProvider = null, string? registryAccount = null,
-        string? composeCmdWrapper = null, IReadOnlyList<string>? ignoreServices = null)
+        string? composeCmdWrapper = null, IReadOnlyList<string>? ignoreServices = null, bool destroyBeforeDeploy = false)
     {
         // `environment` is a .env-style string Komodo hands to `docker compose` for ${VAR} interpolation.
         // registry_provider/registry_account point the Periphery at a Komodo Docker Registry Account so it
@@ -111,6 +111,7 @@ internal sealed partial class KomodoApiClient
                 : new[] { "up", "down", "pull", "build", "run" },
             // Run-once services exit by design; counted in the stack status, they mark it unhealthy.
             ignore_services = ignoreServices ?? Array.Empty<string>(),
+            destroy_before_deploy = destroyBeforeDeploy,
         };
         var existingId = await FindStackIdAsync(name, ct);
         if (existingId is null)
