@@ -157,8 +157,8 @@ public sealed class PangolinIngress
     /// it explicitly via the Integration API. No-op unless apiUrl/apiKey/org are all configured. REMOVE this
     /// method + its caller once #1864 / its linked feature request lands and newt reconciles.
     /// </summary>
-    /// <returns><c>true</c> when a resource was found and deleted; <c>false</c> when there was nothing to delete
-    /// (no such resource, or the Integration API is not configured).</returns>
+    /// <returns><c>true</c> when at least one resource was found and deleted; <c>false</c> when there was nothing
+    /// to delete (no such resource, or the Integration API is not configured).</returns>
     public async Task<bool> TeardownAsync(HttpClient http, string niceId, CancellationToken ct)
     {
         if (_apiUrl is null || _apiKey is null || _org is null)
@@ -166,29 +166,31 @@ public sealed class PangolinIngress
             return false;
         }
 
-        var resourceId = await FindResourceIdAsync(http, niceId, ct);
-        if (resourceId is null)
+        // Delete every match, not the first: Pangolin can hold more than one resource with the same niceId
+        // (seen when label-driven updates race), and any one left keeps serving the route.
+        var deleted = false;
+        foreach (var resourceId in await FindResourceIdsAsync(http, niceId, ct))
         {
-            return false;
+            using var del = new HttpRequestMessage(HttpMethod.Delete, $"{_apiUrl}/v1/resource/{resourceId}");
+            del.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+            using var resp = await http.SendAsync(del, ct);
+            // 404 = already gone; treat as success. Anything else non-2xx throws.
+            if (resp.StatusCode is not (HttpStatusCode.OK or HttpStatusCode.NoContent or HttpStatusCode.NotFound))
+            {
+                resp.EnsureSuccessStatusCode();
+            }
+            deleted |= resp.StatusCode is not HttpStatusCode.NotFound;
         }
-
-        using var del = new HttpRequestMessage(HttpMethod.Delete, $"{_apiUrl}/v1/resource/{resourceId}");
-        del.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
-        using var resp = await http.SendAsync(del, ct);
-        // 404 = already gone; treat as success. Anything else non-2xx throws.
-        if (resp.StatusCode is not (HttpStatusCode.OK or HttpStatusCode.NoContent or HttpStatusCode.NotFound))
-        {
-            resp.EnsureSuccessStatusCode();
-        }
-        return resp.StatusCode is not HttpStatusCode.NotFound;
+        return deleted;
     }
 
     // The list endpoint pages (20 per page by default, sorted by name), so reading only the first page misses
     // the resource once the org has more than a page of them. `query` narrows the list server-side (it matches
     // name, niceId or domain as a substring); walk every page of what it returns and match niceId exactly.
-    private async Task<int?> FindResourceIdAsync(HttpClient http, string niceId, CancellationToken ct)
+    private async Task<List<int>> FindResourceIdsAsync(HttpClient http, string niceId, CancellationToken ct)
     {
         const int pageSize = 100;
+        var ids = new List<int>();
         for (var page = 1; page <= 1000; page++)
         {
             using var req = new HttpRequestMessage(HttpMethod.Get,
@@ -201,14 +203,14 @@ public sealed class PangolinIngress
                 !data.TryGetProperty("resources", out var resources) ||
                 resources.ValueKind != JsonValueKind.Array)
             {
-                return null;
+                return ids;
             }
             foreach (var r in resources.EnumerateArray())
             {
                 if (r.TryGetProperty("niceId", out var n) && n.GetString() == niceId &&
                     r.TryGetProperty("resourceId", out var id) && id.TryGetInt32(out var rid))
                 {
-                    return rid;
+                    ids.Add(rid);
                 }
             }
             // Stop on the server's own count when it reports one; it may cap pageSize below what was asked.
@@ -220,10 +222,10 @@ public sealed class PangolinIngress
                 : count < pageSize;
             if (count == 0 || done)
             {
-                return null;
+                return ids;
             }
         }
-        return null;
+        return ids;
     }
 }
 
