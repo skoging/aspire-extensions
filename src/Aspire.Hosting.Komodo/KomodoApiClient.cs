@@ -48,6 +48,13 @@ internal sealed partial class KomodoApiClient
         return doc.RootElement.Clone();
     }
 
+    /// <summary>
+    /// Params for a List call that returns every item: Komodo 2.3 pages its List APIs by default (50 items,
+    /// configurable) unless the request passes <c>limit: 0</c>. Earlier versions ignore the field, and so
+    /// does ListVariables, which doesn't page; it is sent there too in case it ever does.
+    /// </summary>
+    private static readonly object AllItems = new { limit = 0 };
+
     public Task<JsonElement> ReadAsync(string type, object p, CancellationToken ct) => CallAsync("read", type, p, ct);
     public Task<JsonElement> WriteAsync(string type, object p, CancellationToken ct) => CallAsync("write", type, p, ct);
     public Task<JsonElement> ExecuteAsync(string type, object p, CancellationToken ct) => CallAsync("execute", type, p, ct);
@@ -55,7 +62,7 @@ internal sealed partial class KomodoApiClient
     /// <summary>Resolve a Komodo Server name to its id. Throws if not found.</summary>
     public async Task<string> ResolveServerIdAsync(string serverName, CancellationToken ct)
     {
-        var servers = await ReadAsync("ListServers", new { }, ct);
+        var servers = await ReadAsync("ListServers", AllItems, ct);
         foreach (var s in servers.EnumerateArray())
         {
             if (string.Equals(GetString(s, "name"), serverName, StringComparison.OrdinalIgnoreCase))
@@ -69,7 +76,7 @@ internal sealed partial class KomodoApiClient
     /// <summary>Find a Stack id by name, or null if it doesn't exist yet.</summary>
     public async Task<string?> FindStackIdAsync(string name, CancellationToken ct)
     {
-        var stacks = await ReadAsync("ListStacks", new { }, ct);
+        var stacks = await ReadAsync("ListStacks", AllItems, ct);
         foreach (var s in stacks.EnumerateArray())
         {
             if (string.Equals(GetString(s, "name"), name, StringComparison.OrdinalIgnoreCase))
@@ -143,7 +150,7 @@ internal sealed partial class KomodoApiClient
 
     public async Task<HashSet<string>> ListVariableNamesAsync(CancellationToken ct)
     {
-        var variables = await ReadAsync("ListVariables", new { }, ct);
+        var variables = await ReadAsync("ListVariables", AllItems, ct);
         return variables.EnumerateArray()
             .Select(v => GetString(v, "name"))
             .OfType<string>()
